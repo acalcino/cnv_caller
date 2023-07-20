@@ -18,12 +18,12 @@ def submit_qsub_job(args):
     gmap_location = os.path.join(resources_directory, "genetic_map_hg38_withX.txt.gz")
 
     # Set the location of the SNP VCF file
-    snpvcf_location = os.path.join(resources_directory, "genome1K.phase3.SNP_AF5e2.chr1toX.hg38.vcf")
+    snpvcf_location = os.path.join(resources_directory, "genome1K.phase3.SNP_AF5e2.chr1toX.hg38.vcf.gz")
 
     # Check if the SNP VCF file exists
     if not os.path.exists(snpvcf_location):
         # Download the SNP VCF file
-        vcf_url = "https://sourceforge.net/projects/cellsnp/files/SNPlist/genome1K.phase3.SNP_AF5e2.chr1toX.hg38.vcf"
+        vcf_url = "http://ufpr.dl.sourceforge.net/project/cellsnp/SNPlist/genome1K.phase3.SNP_AF5e2.chr1toX.hg38.vcf.gz"
         vcf_file = os.path.join(resources_directory, "genome1K.phase3.SNP_AF5e2.chr1toX.hg38.vcf.gz")
         os.system(f"wget {vcf_url} -O {vcf_file}")
 
