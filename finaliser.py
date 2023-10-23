@@ -17,7 +17,6 @@ def main():
     parser.add_argument('--mem', default='8GB', help='Memory for the qsub job. Default: 8GB')
     parser.add_argument('--cpus', default='1', help='Number of CPUs for the qsub job. Default: 1')
 
-
     # Parse the command-line arguments
     args = parser.parse_args()
 
@@ -31,6 +30,14 @@ def main():
     else:
         max_iteration = 0
 
+    # Create the 'intervals' directory if it doesn't exist
+    intervals_directory = 'intervals'
+    os.makedirs(intervals_directory, exist_ok=True)
+
+    # Create the 'vcfs' directory if it doesn't exist
+    vcfs_directory = os.path.join(parent_folder, 'vcfs')
+    os.makedirs(vcfs_directory, exist_ok=True)
+
     # Iterate over the segs_consensus files
     segs_file = os.path.join(parent_folder, f'segs_consensus_{max_iteration}.tsv')
     with open(segs_file, 'r') as file:
@@ -43,13 +50,13 @@ def main():
         for line in lines[1:]:
             if 'neu' not in line:
                 chromosome_number = line.split('\t')[1]
-                chromosome_number = 'chr' + chromosome_number   #Adds chr to the chromosome number. Comment if unnecessary
+#                chromosome_number = 'chr' + chromosome_number   #Adds chr to the chromosome number. Comment if unnecessary
                 chromosome_numbers.append(chromosome_number)  # Append the chromosome number to the list
                 start = int(line.split('\t')[5])
                 stop = int(line.split('\t')[6])
-                seg = line.split('\t')[2]
+                seg_cons = line.split('\t')[26]
                 length = stop - start
-                file.write('\t'.join([chromosome_number, str(start), str(stop), seg, str(length), '+']) + '\n')
+                file.write('\t'.join([chromosome_number, str(start), str(stop), seg_cons, str(length), '+']) + '\n')
 
     # Create qsub files to run haplotypecaller and designate column names for final table output
     bams = []
@@ -96,108 +103,171 @@ bcftools view -i 'GT="hom"' {os.path.join(args.subset_folder, f"{bam_name}.vcf")
         #subprocess.run(['qsub', qsub_file])
 
         # Extract the job ID from the output
+        job_ids = []  # Initialize the list here
         job_id = submit_output.strip().split('.')[0]
         job_ids.append(job_id)  # Add the job ID to the list
 
     # Wait for the qsub jobs to finish
-    while True:
-        time.sleep(10)  # Sleep for 10 seconds before checking the status again
-        process = subprocess.run(['qstat'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        output = process.stdout.decode('utf-8')
-        if all(job_id not in output for job_id in job_ids):
-        #if 'qw' not in output and 'r' not in output:  # Check if there are no pending or running jobs
-            break
+#    while True:
+#        time.sleep(10)  # Sleep for 10 seconds before checking the status again
+#        process = subprocess.run(['qstat'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+#        output = process.stdout.decode('utf-8')
+#        if all(job_id not in output for job_id in job_ids):
+#        #if 'qw' not in output and 'r' not in output:  # Check if there are no pending or running jobs
+#            break
+
+    # Wait for the qsub jobs to finish
+    # Hopefully this works better
+    for job_id in job_ids:
+        while True:
+            time.sleep(10)
+            process = subprocess.run(['qstat', job_id], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            output = process.stdout.decode('utf-8')
+            if job_id not in output:
+                break
 
     print("All qsub jobs have finished.")
 
-    #Creates a list called formatted_line which is used to produce the header for the final table
-    intervals_file = os.path.join(args.subset_folder, 'intervals.bed')
-    formatted_lines = []  # List to store the formatted lines
+    # Read the 'intervals.bed' file and create separate '.bed' files
+    intervals_bed_path = os.path.join(args.subset_folder, 'intervals.bed')
+    with open(intervals_bed_path, 'r') as intervals_bed_file:
+        for line in intervals_bed_file:
+            fields = line.strip().split('\t')
+            # Extract the fourth column value as the filename
+            filename = fields[3] + '.bed'
+            # Create the full path for the new file in the 'intervals' directory
+            output_path = os.path.join(intervals_directory, filename)
+            # Write the line to the new '.bed' file
+            with open(output_path, 'w') as output_file:
+                output_file.write(line)
 
-    with open(intervals_file, 'r') as file:
-        for line in file:
-            columns = line.strip().split('\t')
-            column1 = columns[0]
-            column2 = columns[1]
-            column3 = columns[2]
-            formatted_line = f"{column1}:{column2}-{column3}"
-            formatted_lines.append(formatted_line)
+     # Iterate through VCF files to make sure any vcfs are indexed
+    for vcf_filename in os.listdir(parent_folder):
+        if vcf_filename.endswith("_het.vcf") or vcf_filename.endswith("_hom.vcf"):
+            # Extract the value from the VCF filename
+            value = os.path.splitext(vcf_filename)[0]
 
-    #For the final table
-    for bam_name in bams:
-        het_vcf_file = os.path.join(args.subset_folder, f"{bam_name}_het.vcf")
-        hom_vcf_file = os.path.join(args.subset_folder, f"{bam_name}_hom.vcf")
-        het_line_counts = get_matching_line_counts(het_vcf_file, chromosome_numbers)
-        hom_line_counts = get_matching_line_counts(hom_vcf_file, chromosome_numbers)
-        het_snp_line_counts = get_snp_line_counts(het_vcf_file, chromosome_numbers)
-        hom_snp_line_counts = get_snp_line_counts(hom_vcf_file, chromosome_numbers)
+            # Zip the VCF file using bgzip
+            subprocess.run(['bgzip', '-f', os.path.join(parent_folder, vcf_filename)])
 
-        table_data[bam_name]["Het Line Counts"] = het_line_counts
-        table_data[bam_name]["Hom Line Counts"] = hom_line_counts
-        table_data[bam_name]["Het SNP Line Counts"] = het_snp_line_counts
-        table_data[bam_name]["Hom SNP Line Counts"] = hom_snp_line_counts
+            # Index the VCF file using bcftools
+            subprocess.run(['bcftools', 'index', os.path.join(parent_folder, vcf_filename + '.gz')])
 
-    # Create a dictionary to store the transposed data
-    transposed_data = {}
+    # Iterate through indexed VCF files to create vcf files for each cnv for each clone
+    for vcf_gz_filename in os.listdir(parent_folder):
+        if vcf_gz_filename.endswith("_het.vcf.gz") or vcf_gz_filename.endswith("_hom.vcf.gz"):
+            # Extract the value from the VCF filename
+            base_filename = os.path.splitext(vcf_gz_filename)[0]  # Remove the .gz extension
+            value_gz = base_filename.split('_')[0]  # Split on '_' and take the first part
 
-    # Transpose the data
-    for bam_name in bams:
-        for chromosome_number in chromosome_numbers:
-            het_count = table_data[bam_name]["Het Line Counts"][chromosome_number]
-            hom_count = table_data[bam_name]["Hom Line Counts"][chromosome_number]
-            het_snp_count = table_data[bam_name]["Het SNP Line Counts"][chromosome_number]
-            hom_snp_count = table_data[bam_name]["Hom SNP Line Counts"][chromosome_number]
-            row_values = [f"Het: {het_count}", f"Hom: {hom_count}", f"Het SNP: {het_snp_count}", f"Hom SNP: {hom_snp_count}"]
-            if bam_name in transposed_data:
-                transposed_data[bam_name].append(row_values)
-            else:
-                transposed_data[bam_name] = [row_values]
+            # Construct the command to extract values from 'bulk_clones_final.tsv.gz'
+            bulk_clones_final_path = os.path.join(os.path.dirname(parent_folder), 'bulk_clones_final.tsv.gz')
+            cmd = (
+                f"zcat {bulk_clones_final_path} | "
+                f"awk -F '\t' '$29 == \"{value_gz}\"' | "
+                f"awk -F '\t' '$77 != \"neu\" {{print $47}}' | uniq"
+            )
+            output = subprocess.check_output(cmd, shell=True, text=True)
 
-    # Print the transposed table
-    header = "\t".join(["seg"] + formatted_lines)
-    print(header)
-    for bam_name in bams:
-        rows = []
-        for i in range(len(chromosome_numbers)):
-            row_values = [bam_name] + [transposed_data[bam_name][j][i] for j in range(len(transposed_data[bam_name]))]
-            rows.append("\t".join(row_values))
-        print("\n".join(rows))
+            # Split the 'output' into lines and iterate through each line
+            for output_line in output.split('\n'):
+                if output_line:
+                    # Construct the tabix command for this output value
+                    tabix_cmd = (
+                        f"tabix -R {intervals_directory}/{output_line}.bed {vcf_gz_filename} > {vcfs_directory}/{value_gz}_{output_line}_h{base_filename.split('_h', 1)[-1]}"
+                    )
+                    # Run the tabix command
+                    subprocess.run(tabix_cmd, shell=True)
+ 
+                    print(f"Processed {vcf_gz_filename} for {output_line}")
+ 
+    # Create vcfs for every location in intervals.bed for null_het.vcf.gz and null_hom.vcf.gz
+    # Define paths to null VCF files
+    null_het_vcf = os.path.join(parent_folder, 'null_het.vcf.gz')
+    null_hom_vcf = os.path.join(parent_folder, 'null_hom.vcf.gz')
+ 
+    # Iterate through bed files in intervals directory
+    for bed_filename in os.listdir(intervals_directory):
+        if bed_filename.endswith(".bed"):
+            bed_path = os.path.join(intervals_directory, bed_filename)
+            bed_name = os.path.splitext(bed_filename)[0]
+ 
+            # Construct the tabix commands for this output value
+            tabix_cmd_het = (
+                f"tabix -R {intervals_directory}/{bed_name}.bed {null_het_vcf} > {vcfs_directory}/null_{bed_name}_het.vcf"
+            )
+            tabix_cmd_hom = (
+                f"tabix -R {intervals_directory}/{bed_name}.bed {null_hom_vcf} > {vcfs_directory}/null_{bed_name}_hom.vcf"
+            )
+            # Run the tabix command
+            subprocess.run(tabix_cmd_het, shell=True)
+            subprocess.run(tabix_cmd_hom, shell=True)
+ 
+            print(f"Generated null VCFs for {bed_name}")    
 
-    #Save the table to a file
-    output_file = os.path.join(args.subset_folder, "final_numbers.tsv")
+    # Define a dictionary to store counts
+    counts = {}
+ 
+    # Iterate through indexed VCF files
+    for het_hom_vcf_gz_filename in os.listdir(vcfs_directory):
+        if het_hom_vcf_gz_filename.endswith(".vcf"):
+            # Extract the value from the VCF filename
+            value_gz, output_line = os.path.splitext(het_hom_vcf_gz_filename)[0].split('_')[:2]
 
-    with open(output_file, "w") as file:
-        header = "\t".join(["seg"] + formatted_lines)
-        file.write(header + "\n")
+            # Determine if it's 'het' or 'hom' based on the filename
+            file_type = 'het' if 'het' in het_hom_vcf_gz_filename else 'hom'
 
-        for bam_name in bams:
-            rows = []
-            for i in range(len(chromosome_numbers)):
-                row_values = [bam_name] + [transposed_data[bam_name][j][i] for j in range(len(transposed_data[bam_name]))]
-                rows.append("\t".join(row_values))
-            file.write("\n".join(rows) + "\n")
+            # Read the VCF file and count lines
+            with open(os.path.join(vcfs_directory, het_hom_vcf_gz_filename), 'r') as vcf_file:
+                line_count = sum(1 for line in vcf_file)
 
-    print(f"Transposed table saved to {output_file}.")
+            # Update the counts dictionary
+            if value_gz not in counts:
+                counts[value_gz] = {'het': {}, 'hom': {}}
 
-def get_matching_line_counts(file_path, chromosome_numbers):
-    line_counts = {chromosome_number: 0 for chromosome_number in chromosome_numbers}
-    with open(file_path, 'r') as file:
-        for line in file:
-            for chromosome_number in chromosome_numbers:
-                if line.startswith(chromosome_number + '\t'):
-                    line_counts[chromosome_number] += 1
-                    break
-    return line_counts
+            if output_line not in counts[value_gz][file_type]:
+                counts[value_gz][file_type][output_line] = 0
 
-def get_snp_line_counts(file_path, chromosome_numbers):
-    line_counts = {chromosome_number: 0 for chromosome_number in chromosome_numbers}
-    for chromosome_number in chromosome_numbers:
-        command = f"bcftools view -i 'TYPE=\"snp\"' {file_path} | grep -P '^{chromosome_number}\t' | wc -l"
-        result = subprocess.run(command, shell=True, capture_output=True, text=True)
-        if result.returncode == 0:
-            count = int(result.stdout.strip())
-            line_counts[chromosome_number] = count
-    return line_counts
+            # Update the count
+            counts[value_gz][file_type][output_line] += line_count
+
+    # Define a dictionary to store null ratios
+    null_ratios = {}
+
+    # Calculate null ratios
+    for bed_filename in os.listdir(intervals_directory):
+        if bed_filename.endswith(".bed"):
+            bed_name = os.path.splitext(bed_filename)[0]
+
+            # Calculate null ratios
+            null_het_file = f"{vcfs_directory}/null_{bed_name}_het.vcf"
+            null_hom_file = f"{vcfs_directory}/null_{bed_name}_hom.vcf"
+
+            with open(null_het_file, 'r') as null_het_vcf, open(null_hom_file, 'r') as null_hom_vcf:
+                het_count = sum(1 for line in null_het_vcf)
+                hom_count = sum(1 for line in null_hom_vcf)
+                ratio = het_count / hom_count if hom_count != 0 else 'N/A'
+
+                null_ratios[bed_name] = ratio
+
+    # Define the output file path
+    output_file_path = os.path.join(parent_folder, 'output_counts.tsv')
+
+    # Write the counts to the output file
+    with open(output_file_path, 'w') as output_file:
+        output_file.write("clone\tcnv\thet number\thom number\tratio\tnull ratio\n")
+        for value_gz, output_lines in counts.items():
+            for output_line, het_count in output_lines['het'].items():
+                if not value_gz.startswith('null'):  # Exclude rows starting with "null"
+                    hom_count = output_lines['hom'].get(output_line, 0)
+                    ratio = het_count / hom_count if hom_count != 0 else 'N/A'
+
+                    # Fetch the null ratio
+                    null_ratio = null_ratios.get(output_line, 'N/A')
+
+                    output_file.write(f"{value_gz}\t{output_line}\t{het_count}\t{hom_count}\t{ratio}\t{null_ratio}\n")
+
+    print(f"Counts written to {output_file_path}")
 
 
 if __name__ == '__main__':
