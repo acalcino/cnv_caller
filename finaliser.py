@@ -15,15 +15,13 @@ def main():
     parser.add_argument('--genome', required=True, help='Path to genome fasta')
     parser.add_argument('--walltime', default='24:00:00', help='Walltime for the qsub job. Default: 24:00:00')
     parser.add_argument('--mem', default='8GB', help='Memory for the qsub job. Default: 8GB')
+    parser.add_argument('--cpus', default='1', help='Number of CPUs for the qsub job. Default: 1')
 
     # Parse the command-line arguments
     args = parser.parse_args()
 
-    # Get the parent folder of the subset folder
-    parent_folder = os.path.dirname(args.subset_folder)
-
     # Find the highest number in the segs_consensus files
-    segs_files = glob.glob(os.path.join(parent_folder, 'segs_consensus_*.tsv'))
+    segs_files = glob.glob(os.path.join(args.subset_folder, 'segs_consensus_*.tsv'))
     if segs_files:
         max_iteration = max([int(os.path.splitext(file)[0].split('_')[-1]) for file in segs_files])
     else:
@@ -34,7 +32,7 @@ def main():
     os.makedirs(intervals_directory, exist_ok=True)
 
     # Create the 'vcfs' directory if it doesn't exist
-    vcfs_directory = os.path.join(parent_folder, 'vcfs')
+    vcfs_directory = os.path.join(args.subset_folder, 'vcfs')
     os.makedirs(vcfs_directory, exist_ok=True)
 
     # Iterate over the segs_consensus files
@@ -84,13 +82,13 @@ def main():
             file.write(f'''#!/bin/bash
 #PBS -P pq84
 #PBS -q normalbw
-#PBS -l walltime={args.walltime},mem={args.mem},jobfs=100GB,ncpus=1
+#PBS -l walltime={args.walltime},mem={args.mem},jobfs=100GB,ncpus={args.cpus}
 #PBS -l storage=gdata/pq84+gdata/u86+scratch/u86+gdata/xx92
 
 module load gatk
 module load bcftools
 
-gatk HaplotypeCaller -R {args.genome} -I {os.path.join(args.subset_folder, f"{bam_name}.bam")} -L {os.path.join(args.subset_folder, "intervals.bed")} --native-pair-hmm-threads 1 -O {os.path.join(args.subset_folder, f"{bam_name}.vcf")}
+gatk HaplotypeCaller -R {args.genome} -I {os.path.join(args.subset_folder, f"{bam_name}.bam")} -L {os.path.join(args.subset_folder, "intervals.bed")} --native-pair-hmm-threads {args.cpus} -O {os.path.join(args.subset_folder, f"{bam_name}.vcf")}
 
 bcftools view -i 'GT="het"' {os.path.join(args.subset_folder, f"{bam_name}.vcf")} >{os.path.join(args.subset_folder, f"{bam_name}" + "_het.vcf")}
 bcftools view -i 'GT="hom"' {os.path.join(args.subset_folder, f"{bam_name}.vcf")} >{os.path.join(args.subset_folder, f"{bam_name}" + "_hom.vcf")}
@@ -141,26 +139,24 @@ bcftools view -i 'GT="hom"' {os.path.join(args.subset_folder, f"{bam_name}.vcf")
                 output_file.write(line)
 
      # Iterate through VCF files to make sure any vcfs are indexed
-    for vcf_filename in os.listdir(parent_folder):
+    for vcf_filename in os.listdir(args.subset_folder):
         if vcf_filename.endswith("_het.vcf") or vcf_filename.endswith("_hom.vcf"):
-            # Extract the value from the VCF filename
-            value = os.path.splitext(vcf_filename)[0]
 
             # Zip the VCF file using bgzip
-            subprocess.run(['bgzip', '-f', os.path.join(parent_folder, vcf_filename)])
+            subprocess.run(['bgzip', '-f', os.path.join(args.subset_folder, vcf_filename)])
 
             # Index the VCF file using bcftools
-            subprocess.run(['bcftools', 'index', os.path.join(parent_folder, vcf_filename + '.gz')])
+            subprocess.run(['bcftools', 'index', os.path.join(args.subset_folder, vcf_filename + '.gz')])
 
     # Iterate through indexed VCF files to create vcf files for each cnv for each clone
-    for vcf_gz_filename in os.listdir(parent_folder):
+    for vcf_gz_filename in os.listdir(args.subset_folder):
         if vcf_gz_filename.endswith("_het.vcf.gz") or vcf_gz_filename.endswith("_hom.vcf.gz"):
             # Extract the value from the VCF filename
             base_filename = os.path.splitext(vcf_gz_filename)[0]  # Remove the .gz extension
             value_gz = base_filename.split('_')[0]  # Split on '_' and take the first part
 
             # Construct the command to extract values from 'bulk_clones_final.tsv.gz'
-            bulk_clones_final_path = os.path.join(os.path.dirname(parent_folder), 'bulk_clones_final.tsv.gz')
+            bulk_clones_final_path = os.path.join(os.path.dirname(args.subset_folder), 'bulk_clones_final.tsv.gz')
             cmd = (
                 f"zcat {bulk_clones_final_path} | "
                 f"awk -F '\t' '$29 == \"{value_gz}\"' | "
@@ -182,8 +178,8 @@ bcftools view -i 'GT="hom"' {os.path.join(args.subset_folder, f"{bam_name}.vcf")
  
     # Create vcfs for every location in intervals.bed for null_het.vcf.gz and null_hom.vcf.gz
     # Define paths to null VCF files
-    null_het_vcf = os.path.join(parent_folder, 'null_het.vcf.gz')
-    null_hom_vcf = os.path.join(parent_folder, 'null_hom.vcf.gz')
+    null_het_vcf = os.path.join(args.subset_folder, 'null_het.vcf.gz')
+    null_hom_vcf = os.path.join(args.subset_folder, 'null_hom.vcf.gz')
  
     # Iterate through bed files in intervals directory
     for bed_filename in os.listdir(intervals_directory):
@@ -250,7 +246,7 @@ bcftools view -i 'GT="hom"' {os.path.join(args.subset_folder, f"{bam_name}.vcf")
                 null_ratios[bed_name] = ratio
 
     # Define the output file path
-    output_file_path = os.path.join(parent_folder, 'output_counts.tsv')
+    output_file_path = os.path.join(args.subset_folder, 'output_counts.tsv')
 
     # Write the counts to the output file
     with open(output_file_path, 'w') as output_file:
