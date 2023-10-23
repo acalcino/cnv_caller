@@ -1,6 +1,6 @@
 # cnv_caller
 
-cnv_caller is a wrapper for Numbat (https://github.com/kharchenkolab/numbat) that simplifies some of the options. It also includes a bit of pre-processing and does a few calculations on the output. The idea is to use the python scripts in this order:
+cnv_caller is a bunch of wrappers for Numbat (https://github.com/kharchenkolab/numbat) that simplifies some of the options. It also includes a bit of pre-processing and does a few calculations on the output. The idea is to use the python scripts in this order:
 
 1. pileup_and_phaser.py
 2. cnv_caller.py

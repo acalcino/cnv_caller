@@ -15,7 +15,6 @@ def main():
     parser.add_argument('--genome', required=True, help='Path to genome fasta')
     parser.add_argument('--walltime', default='24:00:00', help='Walltime for the qsub job. Default: 24:00:00')
     parser.add_argument('--mem', default='8GB', help='Memory for the qsub job. Default: 8GB')
-    parser.add_argument('--cpus', default='1', help='Number of CPUs for the qsub job. Default: 1')
 
     # Parse the command-line arguments
     args = parser.parse_args()
@@ -85,13 +84,13 @@ def main():
             file.write(f'''#!/bin/bash
 #PBS -P pq84
 #PBS -q normalbw
-#PBS -l walltime={args.walltime},mem={args.mem},jobfs=100GB,ncpus={args.cpus}
+#PBS -l walltime={args.walltime},mem={args.mem},jobfs=100GB,ncpus=1
 #PBS -l storage=gdata/pq84+gdata/u86+scratch/u86+gdata/xx92
 
 module load gatk
 module load bcftools
 
-gatk HaplotypeCaller -R {args.genome} -I {os.path.join(args.subset_folder, f"{bam_name}.bam")} -L {os.path.join(args.subset_folder, "intervals.bed")} --native-pair-hmm-threads {args.cpus} -O {os.path.join(args.subset_folder, f"{bam_name}.vcf")}
+gatk HaplotypeCaller -R {args.genome} -I {os.path.join(args.subset_folder, f"{bam_name}.bam")} -L {os.path.join(args.subset_folder, "intervals.bed")} --native-pair-hmm-threads 1 -O {os.path.join(args.subset_folder, f"{bam_name}.vcf")}
 
 bcftools view -i 'GT="het"' {os.path.join(args.subset_folder, f"{bam_name}.vcf")} >{os.path.join(args.subset_folder, f"{bam_name}" + "_het.vcf")}
 bcftools view -i 'GT="hom"' {os.path.join(args.subset_folder, f"{bam_name}.vcf")} >{os.path.join(args.subset_folder, f"{bam_name}" + "_hom.vcf")}
