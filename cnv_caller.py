@@ -12,7 +12,7 @@ def build_qsub_content(output_location, r_libs_location, walltime, memory, cpus)
 #PBS -l storage=gdata/pq84+gdata/u86+scratch/u86+gdata/xx92
 
 #Make sure R is accessible. If not, uncomment the following line and load the R module
-module load R/4.2.1
+module load R/4.3.1
 
 '''
 
@@ -27,14 +27,14 @@ def build_numbat_r_content(filtered_feature_matrix_location, project_name, allel
     r_content = f'''library(Seurat)
 library(numbat)
 setwd("{output_location}")
-raw <- Read10X(data.dir = "{filtered_feature_matrix_location}")
-raw <- CreateSeuratObject(counts = raw, project = "{project_name}", min.cells = 0, min.features = 0)
-exp.rawdata <- as.matrix(raw@assays$RNA@counts)
+raw_counts <- Read10X(data.dir = "{filtered_feature_matrix_location}")
+raw_seurat <- CreateSeuratObject(counts = raw_counts, project = "{project_name}", min.cells = 0, min.features = 0)
+exp_rawdata <- GetAssayData(object = raw_seurat, assay = "RNA", layer = "counts")
 allele <- read.table(gzfile("{allele_file_location}"), header = TRUE, sep = "\t")
 
 #Make new expression reference from the blood cell types from the hca expression reference
 blood_ref <- ref_hca[, c(1, 3:5, 8:11)]
-out <- run_numbat(exp.rawdata, blood_ref, allele, genome = "hg38", t = 1e-05, ncores = {cpus}, plot = TRUE, out_dir = "{output_location}", max_entropy = {max_entropy}, init_k = {init_k}, min_cells = {min_cells}, tau = {tau}, min_LLR = {min_LLR}, max_iter = {max_iter})
+out <- run_numbat(exp_rawdata, blood_ref, allele, genome = "hg38", t = 1e-05, ncores = {cpus}, plot = TRUE, out_dir = "{output_location}", max_entropy = {max_entropy}, init_k = {init_k}, min_cells = {min_cells}, tau = {tau}, min_LLR = {min_LLR}, max_iter = {max_iter})
 '''
 
     return r_content
